@@ -1,0 +1,101 @@
+---
+title: "Analyzing NYC Shooting Incidents from 2006 to 2022"
+author: "Viktor Lequin"
+date: "2024-04-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+We are using the NYPD shooting data at <https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv>. This data has daily shooting data by borough. Our objective is to use the raw data as source for some analysis and visualization, to draw some insights from it. The main questions that we seek to answer from this data are the following:
+
+1. How has each borough's percentage share in the total number of shootings per year in NYC change over time?
+2. What is the trend in the total number of shootings per year in NYC over time?
+3. How are different racial groups impacted as victims in NYC shootings?
+
+# Part 1: Loading Libraries and Data
+
+We first load the required libraries and the source data:
+
+```{r initialize}
+library("tidyverse")
+library("lubridate")
+library("ggplot2")
+
+nypd_shooting_data <- read_csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv")
+```
+
+# Part 2: Trend of Each Borough's Percentage Share in Annual Shootings
+
+We can use the data to understand how each Borough's share in the total annual shootings have changed over time. 
+
+```{r part_2}
+annual_shootings <- select(nypd_shooting_data, c('OCCUR_DATE')) %>% mutate(OCCUR_DATE = mdy(OCCUR_DATE)) %>% group_by(lubridate::year(OCCUR_DATE)) %>% summarize(annual_shootings = n())  %>% rename(YEAR = `lubridate::year(OCCUR_DATE)`) %>% ungroup()
+
+annual_shootings_by_boro <- select(nypd_shooting_data, c('OCCUR_DATE', 'BORO')) %>% mutate(OCCUR_DATE = mdy(OCCUR_DATE)) %>% group_by(lubridate::year(OCCUR_DATE), BORO) %>% summarize(shootings = n()) %>% rename(YEAR = `lubridate::year(OCCUR_DATE)`) %>% ungroup() %>% left_join (annual_shootings, by = join_by(YEAR)) %>% mutate(percent_of_annual_total = shootings/annual_shootings)
+
+
+percentage_by_boro_over_time = ggplot(annual_shootings_by_boro, aes(x=YEAR, y=percent_of_annual_total, fill=BORO)) +  geom_area()
+percentage_by_boro_over_time
+```
+
+The main insight that we can draw from a visual inspection of the results is that Brooklyn started out as the Borough with the largest source of shooting events, but by the end of the period, its share has dropped down and Bronx's has gone up slightly. By 2022, Brooklyn and Bronx equally contribute to the City's shooting events. Manhattan's share has slightly increased, while Queens share is very stable through time. Staten Island contributed least to the shootings over all periods.
+
+The data does not provide us more information to find the cause of the change in the trend over time. It could be driven by demographic changes over the whole period, changes in governmental policies and response, and other factors but it needs to be examined further with additional data.
+
+# Part 3: Trend Model of Total Shootings in NYC Over Time
+
+We can also use the data to see the long term trend of the number of shootings:
+
+```{r part_3_a}
+total_shootings_over_time <- ggplot(annual_shootings, aes(x=YEAR, y=annual_shootings)) +  geom_line()
+total_shootings_over_time
+```
+
+You can see in the above that there was a clear downtrend in shootings fom 2006 up to 2019, but there is a marked increase since since 2020-2022.
+
+We can run a regression model of the annual shootings against time:
+
+```{r part_3_b}
+annual_trend_model <- lm(annual_shootings~YEAR, data=annual_shootings)
+summary(annual_trend_model)
+```
+
+Because of how 2020-2022 bucked the downward trend, the linear model fit does not look too good, indicating that the linear model has very limited predictive power with the low R-squared. We can plot the regression line against the actual data as follows:
+
+```{r part_3_c}
+
+annual_trend_model_plot <- ggplot(annual_shootings  , aes(x = YEAR, y = annual_shootings)) + geom_line() + geom_point() + stat_smooth(method = "lm")
+annual_trend_model_plot
+```
+
+The insight that we can draw from this is that the shooting incidents rate was on a significant decline trend from 2006 up to 2019, but it shot up (pun intended) dramatically from 2020 to 2022. We don't have more information from this dataset to find some causative factors, but a significant event that happened between 2020 to 2022 is the Covid-19 pandemic. There might be an association between the human pressures and stresses caused by the pandemic to the increase in shooting incidents, but this needs to be studied further in a separate study with additional data.
+
+# Part 4: Trend of Each Race's Percentage Share in Annual Shootings
+
+As the data has information on the race of the victim, we can see the trend of the share of each race in the total events per year:
+
+```{r part_4}
+annual_shootings_by_victim_race <- select(nypd_shooting_data, c('OCCUR_DATE', 'VIC_RACE')) %>% mutate(OCCUR_DATE = mdy(OCCUR_DATE)) %>% group_by(lubridate::year(OCCUR_DATE), VIC_RACE) %>% summarize(shootings = n()) %>% rename(YEAR = `lubridate::year(OCCUR_DATE)`) %>% ungroup() %>% left_join (annual_shootings, by = join_by(YEAR)) %>% mutate(percent_of_annual_total = shootings/annual_shootings)
+
+percentage_by_victim_race_over_time = ggplot(annual_shootings_by_victim_race, aes(x=YEAR, y=percent_of_annual_total, fill=VIC_RACE)) +  geom_area()
+percentage_by_victim_race_over_time
+```
+
+We see that black people are very disproportionately the victims of shooting crimes. From this, we should increase the support we provide to black people to assist them if they become victims of shootings, or find ways to systematically reduce their probability of being shooting victims in the first place.
+
+# Part 5: Conclusion and Limitations
+
+In conclusion, we saw that the share of each county in the annual shootings remained quite stable over the period in question, with Brooklyn's share slightly decreasing and Bronx's share slightly increasing. We recommend another study, with nore data to find the cause of this trend.
+
+We also saw that in 2020 to 2022, the number of shooting incidents increased dramatically.
+
+We also saw that black people are disproportionately the victims of shooting crimes, and the trend has not improved over time. This has to change, and there should be changes to make sure that black people are safer and not subject as much to shooting incidents.
+
+There are possible biases in the dataset though. I purposefully avoided using the data on the races of perpetrators in my analysis because some races could be disadvantaged and discriminated against with such data, and policies that could arise from the data could be especially punitive for those races. 
+
+There might also be a bias in the interpretation of results - in this case I put forward Covid-19 as a possible factor for the rise of shooting incidents from 2020 up to 2022 but this is a personal perception, and not a conclusion drawn from careful study.

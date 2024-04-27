@@ -1,0 +1,117 @@
+---
+title: "Analyzing Covid-19 Cases and Deaths in the Contiguous US Using JHU Data"
+author: "Viktor Lequin"
+output: html_document
+date: "2024-04-27"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Part 1: Introduction and Objectives
+
+We are using the Johns Hopkins University Covid-19 cases and death data that are available in <https://github.com/CSSEGISandData/COVID-19/tree/master/csse_covid_19_data/csse_covid_19_time_series>. The global datasets from this repository has daily Covid-19 cases and deaths by country, from 1/22/2020 up to 3/9/2023, while the US datasets has daily Covid-19 cases and deaths by county. We will focus on performing analysis on the US dataset. Our objective is to use the raw data as source for some analysis and visualization, to draw some insights from it, primarily on the impact of geolocation on infection and death rates.
+
+Our objective is to use the data to answer the following questions:
+
+1. In the contiguous US, is there a relationship between the geolocation of a county and that county's final cumulative infection rate, defined as the cumulative number of cases as of the last day in the dataset divided by the population of the county?
+2. In the contiguous US, is there a relationship between the geolocation of a county and that county's final cumulative death rate, defined as the cumulative number of deaths divided by the cumulative number of cases as of the last day in the dataset?
+
+# Part 2: Loading libraries and Data
+
+We first load the required libraries and the source data:
+
+```{r initialize}
+library("tidyverse")
+library("lubridate")
+library("ggplot2")
+
+url_in <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+file_names <- c( "time_series_covid19_confirmed_global.csv", "time_series_covid19_deaths_global.csv" ,"time_series_covid19_confirmed_US.csv", "time_series_covid19_deaths_US.csv")
+urls <- str_c(url_in, file_names)
+```
+
+```{r import_data, echo=FALSE}
+global_cases <- read_csv(urls[1])
+global_deaths <- read_csv(urls[2])
+us_cases <- read_csv(urls[3])
+us_deaths <- read_csv(urls[4])
+
+us_cases <- us_cases %>% pivot_longer(cols= -(UID:Combined_Key), names_to = "date", values_to = "cases") %>% mutate(date= mdy(date))
+
+us_deaths <- us_deaths %>% pivot_longer(cols= -(UID:Population), names_to = "date", values_to = "deaths") %>%  mutate(date= mdy(date))
+
+
+us_cases_and_deaths <- us_cases %>% left_join(us_deaths) %>% select (FIPS, Admin2, Province_State, Lat, Long_, date, Population, cases, deaths)
+
+```
+
+# Part 3: Question 1 - Relationship Between A County's Geolocation in the Contiguous US Against the Infection Rate
+
+We derive a new dataset which has the final cumulative cases and deaths by County in the contiguous US. We then compute the infection rate as the cases divided by population, and the death rate as the deaths divided by cases. We cleanup the data by removing rows where the infection rate>100% and infection rate = 0%. We then create a linear model to get the association between the infection rate and the latitude and longitude of the county.
+
+```{r part_3_1}
+non_contiguous_us = c('Alaska', 'American Samoa', 'Hawaii', 'Puerto Rico', 'Virgin Islands', 'Diamond Princess', 'Grand Princess', 'Guam', 'Northern Mariana Islands')
+
+us_cases_and_deaths_totals_by_location <- filter(us_cases_and_deaths, `date` == '2023-03-09', !(Province_State %in% non_contiguous_us)) %>% mutate(infection_rate_percent = 100*cases/Population, death_rate_percent = 100*deaths/cases)
+
+us_cases_and_deaths_totals_by_location <- filter(us_cases_and_deaths_totals_by_location, infection_rate_percent < 100, infection_rate_percent > 0)
+
+infection_rate_by_geo_location_model <- lm(infection_rate_percent~Lat+Long_, data=us_cases_and_deaths_totals_by_location %>% filter(!is.na(infection_rate_percent) & !is.infinite(infection_rate_percent)))
+
+summary(infection_rate_by_geo_location_model)
+
+```
+
+The main result that we can find in the regression analysis is that both latitude and longitude have a very high association with the infection rate, with both having a very high t-value and a very low P-value. R-squared numbers are quite low though, which means that though significant association between the infection_rate and the geolocation exists, geolocation only explains a small part of the variability. In the below charts, we are plotting infection rate by longitude in one chart and infection rate by latitude in another chart:
+
+```{r part_3_2}
+infection_rate_by_longitude_plot <- ggplot(us_cases_and_deaths_totals_by_location  , aes(x = Long_, y = infection_rate_percent)) + geom_line() + geom_point() + stat_smooth(method = "lm")
+infection_rate_by_longitude_plot
+
+infection_rate_by_latitude_plot <- ggplot(us_cases_and_deaths_totals_by_location  , aes(x = Lat, y = infection_rate_percent)) + geom_line() + geom_point() + stat_smooth(method = "lm")
+infection_rate_by_latitude_plot
+
+```
+
+As you can see in the infection_rate_by_longitude_plot charts above, infection rate rises as you go east across the US. One possible reason for this is that infection rate is thought to be correlated to population density, and population density is likely to be higher in the eastern United States, but the dataset does not have data for population density. It thus has to be examined in another study.
+
+In the infection_rate_by_latitude_plot chart, infection rate decreases as you go north. Note that this likely contradicts what we would expect if population density has positive association with the infection rate, since the Northeast has the highest population density in the US. Thus, the negative association between latitude and infection rate could be the subject of another study.
+
+# Part 4: Question 2 - Relationship Between A County's Geolocation in the Contiguous US Against the Death Rate
+
+We perform a similar analysis as that in question 1, but replacing the predicted variable to the death rate, defined as the cumulative number of deaths divided by the cumulative number of cases. 
+
+```{r part_4_1}
+infection_rate_by_geo_location_model <- lm(death_rate_percent~Lat+Long_, data=us_cases_and_deaths_totals_by_location %>% filter(!is.na(death_rate_percent) & !is.infinite(death_rate_percent)))
+
+summary(infection_rate_by_geo_location_model)
+
+```
+
+We show two charts below, one plotting the death rate by latitude and the other plotting the death rate by longitude.
+
+```{r part_4_2}
+death_rate_by_longitude_plot <- ggplot(us_cases_and_deaths_totals_by_location  , aes(x = Long_, y = death_rate_percent)) + geom_line() + geom_point() + stat_smooth(method = "lm")
+death_rate_by_longitude_plot
+
+death_rate_by_latitude_plot <- ggplot(us_cases_and_deaths_totals_by_location  , aes(x = Lat, y = death_rate_percent)) + geom_line() + geom_point() + stat_smooth(method = "lm")
+death_rate_by_latitude_plot
+```
+
+We see from the regression results and the charts above that longitude has a very low coefficient against the death rate, but has low p-value, which means that the slope is significant but very low. This effectively means that the death rate probably does not vary as much across east and west.
+
+We also see that the latitude has a negative correlation with the death rate. A possible explanation for this, that needs to be studied further, is the difference in healthcare quality and vaccine uptake between the northern and southern US, with the southern US being more likely to be vaccine-skeptical.
+
+# Part 5: Conclusion and Limitations
+
+In conclusion, we found that in the contiguous United States, infection rates increase as we go east. We also found that infection rates decrease as we go north.
+
+For death rates, it is likely to be very similar from east to west. Death rates are significantly higher in the south vs the north though.
+
+We should emphasize that all the regression models we implemented had quite very low R-squard (no more than 0.053), so while we see that the relationships we found are statistically significant, they may or may not be important in real life. There might be other, more important variables that drive differences in infection and death rates.
+
+There could also be limitations of the source data, as we do not have assurance of the quality of the data collection efforts between different locations. Uneven quality of data collection efforts could result in information bias, which could potentially skew or tilt the conclusions we can derive from the data. 
+
+This specific topic was also highly politicized, and this could seep into any research and conclusions drawn. For example, I made the hypothesis that the variation in death rate between north and south is possibly due to differences in Covid-19 care, given that I perceive the southern US to be more vaccine-skeptical and Covid-19 skeptical in general, but I don't actually have proof for this, and simply drew from my own perception.
